@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import LoanApprovalForm, { LoanDecision } from './components/LoanApprovalForm';
 import QualityCoach from './components/QualityCoach';
 import { Button } from './components/ui/button';
+import { Switch } from './components/ui/switch';
 import { CheckCircle2, MessageSquare, FileText, RefreshCw, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -677,6 +678,8 @@ export default function App() {
   const [qaSessionCompleted, setQASessionCompleted] = useState(false);
   const [showQualityCoach, setShowQualityCoach] = useState(false);
   const [sopOpen, setSopOpen] = useState(false);
+  const [loanReviewCollapsed, setLoanReviewCollapsed] = useState(false);
+  const [isTraditionalMode, setIsTraditionalMode] = useState(true);
 
   const handleLoanSubmission = (decision: LoanDecision) => {
     setLoanDecision(decision);
@@ -877,76 +880,97 @@ export default function App() {
                 >
                   <div className="glass p-1 rounded-2xl border border-white/20">
                     <div className="bg-white/10 backdrop-blur-sm rounded-xl p-8">
-                      <div className="flex items-center space-x-4 mb-6">
-                        <div className="w-10 h-10 glass-success rounded-full flex items-center justify-center">
-                          <CheckCircle2 className="h-5 w-5 text-white" />
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center space-x-4">
+                          <div className="w-10 h-10 glass-success rounded-full flex items-center justify-center">
+                            <CheckCircle2 className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-semibold text-foreground/90">Loan Application Review</h3>
+                            <p className="text-muted-foreground/80 text-sm">Decision submitted successfully</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="text-xl font-semibold text-foreground/90">Loan Application Review</h3>
-                          <p className="text-muted-foreground/80 text-sm">Decision submitted successfully</p>
-                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => setLoanReviewCollapsed(!loanReviewCollapsed)}
+                          className="text-muted-foreground/60 hover:text-foreground/80"
+                        >
+                          {loanReviewCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                        </Button>
                       </div>
                       
-                      {/* Key Decision Metrics */}
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="text-center p-4 glass rounded-xl border border-green-300/30">
-                          <div className="text-2xl font-bold text-green-600 mb-1">
-                            {loanDecision.decision.toUpperCase()}
+                      {/* Collapsible Content */}
+                      <motion.div
+                        initial={false}
+                        animate={{ 
+                          height: loanReviewCollapsed ? 0 : "auto",
+                          opacity: loanReviewCollapsed ? 0 : 1
+                        }}
+                        transition={{ duration: 0.3 }}
+                        className={loanReviewCollapsed ? "overflow-hidden" : ""}
+                      >
+                        {/* Key Decision Metrics */}
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                          <div className="text-center p-4 glass rounded-xl border border-green-300/30">
+                            <div className="text-2xl font-bold text-green-600 mb-1">
+                              {loanDecision.decision.toUpperCase()}
+                            </div>
+                            <div className="text-xs text-muted-foreground/70">Decision</div>
                           </div>
-                          <div className="text-xs text-muted-foreground/70">Decision</div>
-                        </div>
-                        <div className="text-center p-4 glass rounded-xl border border-green-300/30">
-                          <div className="text-2xl font-bold text-green-600 mb-1">
-                            {loanDecision.riskLevel.toUpperCase()}
+                          <div className="text-center p-4 glass rounded-xl border border-green-300/30">
+                            <div className="text-2xl font-bold text-green-600 mb-1">
+                              {loanDecision.riskLevel.toUpperCase()}
+                            </div>
+                            <div className="text-xs text-muted-foreground/70">Risk Level</div>
                           </div>
-                          <div className="text-xs text-muted-foreground/70">Risk Level</div>
                         </div>
-                      </div>
 
-                      {/* Application Summary */}
-                      <div className="space-y-3 mb-6">
-                        <h4 className="text-foreground/90 font-semibold">Application Summary</h4>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">Applicant:</strong> {loanDecision.applicantName}
-                          </div>
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">Amount:</strong> ${loanDecision.loanAmount.toLocaleString()}
-                          </div>
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">Credit:</strong> {loanDecision.creditScore}
-                          </div>
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">Income:</strong> ${loanDecision.annualIncome.toLocaleString()}
-                          </div>
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">DTI:</strong> {loanDecision.debtToIncomeRatio}%
-                          </div>
-                          <div className="text-foreground/80">
-                            <strong className="text-foreground/90">Employment:</strong> {loanDecision.employmentYears} years
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Decision Reasoning */}
-                      {loanDecision.reasoning && (
+                        {/* Application Summary */}
                         <div className="space-y-3 mb-6">
-                          <h4 className="text-foreground/90 font-semibold">Decision Rationale</h4>
-                          <div className="p-4 glass rounded-xl text-sm text-foreground/80 border border-white/20">
-                            {loanDecision.reasoning}
+                          <h4 className="text-foreground/90 font-semibold">Application Summary</h4>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">Applicant:</strong> {loanDecision.applicantName}
+                            </div>
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">Amount:</strong> ${loanDecision.loanAmount.toLocaleString()}
+                            </div>
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">Credit:</strong> {loanDecision.creditScore}
+                            </div>
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">Income:</strong> ${loanDecision.annualIncome.toLocaleString()}
+                            </div>
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">DTI:</strong> {loanDecision.debtToIncomeRatio}%
+                            </div>
+                            <div className="text-foreground/80">
+                              <strong className="text-foreground/90">Employment:</strong> {loanDecision.employmentYears} years
+                            </div>
                           </div>
                         </div>
-                      )}
 
-                      {/* Conditions if applicable */}
-                      {loanDecision.decision === 'conditional' && loanDecision.conditions && (
-                        <div className="space-y-3">
-                          <h4 className="text-foreground/90 font-semibold">Approval Conditions</h4>
-                          <div className="p-4 glass rounded-xl text-sm text-foreground/80 border border-yellow-300/30 bg-yellow-50/20">
-                            {loanDecision.conditions}
+                        {/* Decision Reasoning */}
+                        {loanDecision.reasoning && (
+                          <div className="space-y-3 mb-6">
+                            <h4 className="text-foreground/90 font-semibold">Decision Rationale</h4>
+                            <div className="p-4 glass rounded-xl text-sm text-foreground/80 border border-white/20">
+                              {loanDecision.reasoning}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+
+                        {/* Conditions if applicable */}
+                        {loanDecision.decision === 'conditional' && loanDecision.conditions && (
+                          <div className="space-y-3">
+                            <h4 className="text-foreground/90 font-semibold">Approval Conditions</h4>
+                            <div className="p-4 glass rounded-xl text-sm text-foreground/80 border border-yellow-300/30 bg-yellow-50/20">
+                              {loanDecision.conditions}
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
                     </div>
                   </div>
                 </motion.div>
@@ -960,16 +984,37 @@ export default function App() {
                 >
                   <div className="glass p-1 rounded-2xl border border-white/20">
                     <div className="bg-white/10 backdrop-blur-sm rounded-xl p-8">
-                      <div className="flex items-center space-x-4 mb-6">
-                        <div className="w-10 h-10 glass-primary rounded-full flex items-center justify-center">
-                          <MessageSquare className="h-5 w-5 text-white" />
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center space-x-4">
+                          <div className="w-10 h-10 glass-primary rounded-full flex items-center justify-center">
+                            <MessageSquare className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-xl font-semibold text-foreground/90">Quality Assurance</h3>
+                            <p className="text-muted-foreground/80 text-sm">
+                              {!qaSessionStarted ? "Ready to begin QA session" : 
+                               qaSessionCompleted ? "Session completed" : "Session in progress"}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="text-xl font-semibold text-foreground/90">Quality Assurance</h3>
-                          <p className="text-muted-foreground/80 text-sm">
-                            {!qaSessionStarted ? "Ready to begin QA session" : 
-                             qaSessionCompleted ? "Session completed" : "Session in progress"}
-                          </p>
+                        {/* Mode Toggle */}
+                        <div className="flex items-center space-x-2">
+                          <Button
+                            variant={isTraditionalMode ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setIsTraditionalMode(true)}
+                            className="text-xs"
+                          >
+                            Traditional
+                          </Button>
+                          <Button
+                            variant={!isTraditionalMode ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setIsTraditionalMode(false)}
+                            className="text-xs"
+                          >
+                            Voice QA
+                          </Button>
                         </div>
                       </div>
 
@@ -985,6 +1030,7 @@ export default function App() {
                           onStart={handleQAStart}
                           isStarted={qaSessionStarted}
                           isVisible={showQualityCoach}
+                          isTraditionalMode={isTraditionalMode}
                         />
                       )}
                     </div>
