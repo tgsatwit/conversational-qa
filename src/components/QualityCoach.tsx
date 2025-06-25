@@ -7,6 +7,7 @@ import { Checkbox } from './ui/checkbox';
 
 import AudioRecorder from './AudioRecorder';
 import { LoanDecision } from './LoanApprovalForm';
+import { performAIQualityCheck, AIQualityCheckResult, AIQualityCheckIssue } from '../utils/openai';
 import { Bot, User, Download, Play, CheckCircle2, AlertCircle, FileEdit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,20 +25,9 @@ interface Recommendation {
   priority: 'high' | 'medium' | 'low';
 }
 
-interface QualityCheckIssue {
-  id: string;
-  category: 'decision' | 'risk' | 'rationale' | 'conditions';
-  severity: 'critical' | 'warning' | 'info';
-  title: string;
-  description: string;
-  suggestion: string;
-}
-
-interface QualityCheckResult {
-  score: number;
-  issues: QualityCheckIssue[];
-  strengths: string[];
-}
+// Using AI-powered interfaces from utils/openai
+// interface QualityCheckIssue is now AIQualityCheckIssue
+// interface QualityCheckResult is now AIQualityCheckResult
 
 interface QualityCoachProps {
   loanDecision: LoanDecision;
@@ -78,139 +68,7 @@ const generateQAPrompt = (decision: LoanDecision, turnNumber: number): string =>
   return prompts[Math.min(turnNumber, prompts.length - 1)];
 };
 
-const performQualityCheck = (decision: LoanDecision): QualityCheckResult => {
-  const issues: QualityCheckIssue[] = [];
-  const strengths: string[] = [];
-  let score = 100;
-
-  // Check loan-to-value ratio
-  const ltv = (decision.loanAmount / decision.collateralValue) * 100;
-  
-  // Check debt-to-income ratio
-  const dti = decision.debtToIncomeRatio;
-  
-  // Check payment-to-income ratio
-  const monthlyPayment = (decision.loanAmount * 0.005); // Approximate 5% annual rate
-  const monthlyIncome = decision.annualIncome / 12;
-  const _pti = (monthlyPayment / monthlyIncome) * 100;
-
-  // Decision consistency checks
-  if (decision.decision === 'approve' && decision.riskLevel === 'high') {
-    issues.push({
-      id: 'decision-risk-mismatch',
-      category: 'decision',
-      severity: 'critical',
-      title: 'Decision-Risk Inconsistency',
-      description: 'High-risk applications typically require additional conditions or denial',
-      suggestion: 'Consider conditional approval or provide detailed justification for high-risk approval'
-    });
-    score -= 20;
-  }
-
-  if (decision.decision === 'deny' && decision.creditScore > 740 && dti < 30) {
-    issues.push({
-      id: 'strong-profile-denial',
-      category: 'decision',
-      severity: 'warning',
-      title: 'Strong Profile Denial',
-      description: 'Applicant has strong credit score and low DTI ratio',
-      suggestion: 'Ensure denial reasoning addresses specific risk factors beyond credit and DTI'
-    });
-    score -= 15;
-  }
-
-  // Risk assessment checks
-  if (decision.creditScore < 620 && decision.riskLevel === 'low') {
-    issues.push({
-      id: 'credit-risk-mismatch',
-      category: 'risk',
-      severity: 'critical',
-      title: 'Credit Score Risk Underestimation',
-      description: 'Credit score below 620 typically indicates medium to high risk',
-      suggestion: 'Reassess risk level based on credit score'
-    });
-    score -= 25;
-  }
-
-  if (ltv > 90 && decision.riskLevel === 'low') {
-    issues.push({
-      id: 'ltv-risk-mismatch',
-      category: 'risk',
-      severity: 'warning',
-      title: 'High LTV Not Reflected in Risk',
-      description: `LTV of ${ltv.toFixed(1)}% is considered high risk`,
-      suggestion: 'Consider increasing risk level or requiring PMI'
-    });
-    score -= 15;
-  }
-
-  // Rationale quality checks
-  if (!decision.reasoning || decision.reasoning.length < 50) {
-    issues.push({
-      id: 'insufficient-rationale',
-      category: 'rationale',
-      severity: 'critical',
-      title: 'Insufficient Decision Rationale',
-      description: 'Decision rationale is too brief or missing',
-      suggestion: 'Provide detailed reasoning including key factors, calculations, and risk considerations'
-    });
-    score -= 30;
-  }
-
-  if (decision.reasoning && !decision.reasoning.includes('credit score') && !decision.reasoning.includes('DTI')) {
-    issues.push({
-      id: 'missing-key-factors',
-      category: 'rationale',
-      severity: 'warning',
-      title: 'Key Factors Not Mentioned',
-      description: 'Rationale should reference primary underwriting factors',
-      suggestion: 'Include discussion of credit score, DTI ratio, and other key metrics'
-    });
-    score -= 10;
-  }
-
-  // Conditional approval checks
-  if (decision.decision === 'conditional') {
-    if (!decision.conditions || decision.conditions.length < 20) {
-      issues.push({
-        id: 'vague-conditions',
-        category: 'conditions',
-        severity: 'critical',
-        title: 'Vague or Missing Conditions',
-        description: 'Conditional approvals must specify clear, measurable conditions',
-        suggestion: 'Detail specific conditions with timelines and acceptance criteria'
-      });
-      score -= 25;
-    }
-  }
-
-  // Identify strengths
-  if (decision.creditScore >= 740) {
-    strengths.push('Strong credit score demonstrates creditworthiness');
-  }
-  
-  if (dti <= 28) {
-    strengths.push('Debt-to-income ratio is within excellent range');
-  }
-  
-  if (decision.employmentYears >= 2) {
-    strengths.push('Stable employment history reduces income risk');
-  }
-  
-  if (ltv <= 80) {
-    strengths.push('Conservative loan-to-value ratio minimizes collateral risk');
-  }
-  
-  if (decision.reasoning && decision.reasoning.length > 100) {
-    strengths.push('Comprehensive decision rationale provided');
-  }
-
-  return {
-    score: Math.max(0, Math.min(100, score)),
-    issues,
-    strengths
-  };
-};
+// AI-powered quality check function is now imported from utils/openai
 
 const generateRecommendations = (decision: LoanDecision): Recommendation[] => {
   const baseRecommendations = [
@@ -264,13 +122,38 @@ export default function QualityCoach({ loanDecision, onComplete, onStart, isStar
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [showRecommendations, setShowRecommendations] = useState(false);
-  const [qualityCheckResult, setQualityCheckResult] = useState<QualityCheckResult | null>(null);
+  const [qualityCheckResult, setQualityCheckResult] = useState<AIQualityCheckResult | null>(null);
+  const [isLoadingQualityCheck, setIsLoadingQualityCheck] = useState(false);
 
-  // Perform quality check when in traditional mode
+  // Perform AI quality check when in traditional mode
   useEffect(() => {
     if (isTraditionalMode && isVisible) {
-      const result = performQualityCheck(loanDecision);
-      setQualityCheckResult(result);
+      setIsLoadingQualityCheck(true);
+      setQualityCheckResult(null);
+      
+      performAIQualityCheck(loanDecision)
+        .then(result => {
+          setQualityCheckResult(result);
+          setIsLoadingQualityCheck(false);
+        })
+        .catch(error => {
+          console.error('Error performing AI quality check:', error);
+          // Set fallback result
+          setQualityCheckResult({
+            issues: [{
+              id: 'error',
+              category: 'compliance',
+              severity: 'warning',
+              title: 'Quality Check Error',
+              description: 'Unable to perform quality check. Please review manually.',
+              suggestion: 'Check your connection and try again.'
+            }],
+            strengths: [],
+            overallAssessment: 'Quality check temporarily unavailable.',
+            complianceScore: 0
+          });
+          setIsLoadingQualityCheck(false);
+        });
     }
   }, [loanDecision, isTraditionalMode, isVisible]);
 
@@ -457,71 +340,127 @@ export default function QualityCoach({ loanDecision, onComplete, onStart, isStar
 
 
           {/* Traditional Quality Check */}
-          {isTraditionalMode && qualityCheckResult && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              {/* Issues Section */}
-              {qualityCheckResult.issues.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <AlertCircle className="h-5 w-5 text-foreground/60" />
-                    <h4 className="font-semibold text-foreground/90">Issues Identified</h4>
-                    <Badge variant="secondary" className="ml-2">
-                      {qualityCheckResult.issues.length}
-                    </Badge>
+          {isTraditionalMode && (
+            <>
+              {/* Loading State */}
+              {isLoadingQualityCheck && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-center py-8"
+                >
+                  <div className="inline-flex items-center space-x-3 glass p-4 rounded-xl border border-white/20">
+                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-600/30 border-t-blue-600"></div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground/90">AI Quality Assurance in Progress</p>
+                      <p className="text-xs text-foreground/60">Analyzing decision against SOP requirements...</p>
+                    </div>
                   </div>
-                  <div className="space-y-3">
-                    {qualityCheckResult.issues.map((issue, index) => (
-                      <motion.div
-                        key={issue.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="glass p-4 rounded-xl border border-white/20"
-                      >
-                        <div className="space-y-3">
-                          <h5 className="font-semibold text-sm text-foreground/90">{issue.title}</h5>
-                          <p className="text-sm text-foreground/80">{issue.description}</p>
-                          <div className="text-sm text-foreground/80">
-                            <span className="font-medium">Suggestion:</span> {issue.suggestion}
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
+                </motion.div>
               )}
 
-              {/* Strengths Section */}
-              {qualityCheckResult.strengths.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle2 className="h-5 w-5 text-foreground/60" />
-                    <h4 className="font-semibold text-foreground/90">Strengths Identified</h4>
-                    <Badge variant="secondary" className="ml-2">
-                      {qualityCheckResult.strengths.length}
-                    </Badge>
-                  </div>
-                  <div className="space-y-3">
-                    {qualityCheckResult.strengths.map((strength, index) => (
-                      <motion.div
-                        key={index}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="glass p-4 rounded-xl border border-white/20 flex items-start space-x-3"
-                      >
-                        <CheckCircle2 className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-sm text-foreground/80">{strength}</p>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
+              {/* Quality Check Results */}
+              {!isLoadingQualityCheck && qualityCheckResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-6"
+                >
+                  {/* Overall Assessment */}
+                  {qualityCheckResult.overallAssessment && (
+                    <div className="glass p-4 rounded-xl border border-blue-300/30">
+                      <div className="flex items-center space-x-2 mb-3">
+                        <Bot className="h-5 w-5 text-blue-400" />
+                        <h4 className="font-semibold text-foreground/90">AI Quality Assessment</h4>
+                        {qualityCheckResult.complianceScore > 0 && (
+                          <Badge variant="outline" className="ml-2">
+                            Score: {qualityCheckResult.complianceScore}/100
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-foreground/80">{qualityCheckResult.overallAssessment}</p>
+                    </div>
+                  )}
+
+                  {/* Issues Section */}
+                  {qualityCheckResult.issues.length > 0 && (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <AlertCircle className="h-5 w-5 text-foreground/60" />
+                        <h4 className="font-semibold text-foreground/90">Issues Identified</h4>
+                        <Badge variant="secondary" className="ml-2">
+                          {qualityCheckResult.issues.length}
+                        </Badge>
+                      </div>
+                      <div className="space-y-3">
+                        {qualityCheckResult.issues.map((issue, index) => (
+                          <motion.div
+                            key={issue.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.1 }}
+                            className="glass p-4 rounded-xl border border-white/20"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between">
+                                <h5 className="font-semibold text-sm text-foreground/90">{issue.title}</h5>
+                                <div className="flex space-x-2">
+                                  <Badge variant="outline" className="text-xs">
+                                    {issue.category.toUpperCase()}
+                                  </Badge>
+                                  <Badge 
+                                    variant={issue.severity === 'critical' ? 'destructive' : 'secondary'} 
+                                    className="text-xs"
+                                  >
+                                    {issue.severity.toUpperCase()}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <p className="text-sm text-foreground/80">{issue.description}</p>
+                              <div className="text-sm text-foreground/80">
+                                <span className="font-medium">Suggestion:</span> {issue.suggestion}
+                              </div>
+                              {issue.sopReference && (
+                                <div className="text-xs text-foreground/60 bg-muted/30 p-2 rounded">
+                                  <span className="font-medium">SOP Reference:</span> {issue.sopReference}
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Strengths Section */}
+                  {qualityCheckResult.strengths.length > 0 && (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle2 className="h-5 w-5 text-foreground/60" />
+                        <h4 className="font-semibold text-foreground/90">Strengths Identified</h4>
+                        <Badge variant="secondary" className="ml-2">
+                          {qualityCheckResult.strengths.length}
+                        </Badge>
+                      </div>
+                      <div className="space-y-3">
+                        {qualityCheckResult.strengths.map((strength, index) => (
+                          <motion.div
+                            key={index}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.1 }}
+                            className="glass p-4 rounded-xl border border-white/20 flex items-start space-x-3"
+                          >
+                            <CheckCircle2 className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
+                            <p className="text-sm text-foreground/80">{strength}</p>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
               )}
-            </motion.div>
+            </>
           )}
 
           {/* Voice QA Session */}

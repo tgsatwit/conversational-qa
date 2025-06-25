@@ -1,0 +1,149 @@
+Below is a structured “north‑star” architecture and set of technology choices that fit the **voice‑based QA coach** you describe.  Everything is compatible with the React + Express scaffold you already have in place  and with the product goals in your PRD .
+
+---
+
+## 1. Conversation‑engine framework
+
+| What you need                                                                              | Best‑fit framework                    | Why it works                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi‑turn dialogue with branching prompts, reuse of shared state, and clean observability | **LangGraph (JavaScript/TypeScript)** | It is a *state‑graph* abstraction built on LangChain that lets you define nodes (STT → prompt build → LLM → TTS) and edges (e.g., “if confidence < 0.8, ask clarifier”). You get out‑of‑the‑box retry logic, token accounting, tracing in LangSmith, and you can host it inside an Express route. ([langchain.com][1], [langchain-ai.github.io][2]) |
+
+**Alternatives** considered
+
+* Voiceflow / Jovo – great for IVR but heavier, less flexible for bespoke coaching logic.
+* Semantic Kernel planner – strong for orchestration but the LangGraph + LangChain ecosystem ships more maintained JS agents today.
+
+---
+
+## 2. Conversation pipeline (runtime flow)
+
+```mermaid
+graph TD
+ A[Front‑end mic stream] -->|Blob| B(/api/coach)
+ B --> C[Whisper STT]
+ C --> D[LangGraph node: Build prompt from SOP + user decision]
+ D --> E[LangGraph node: GPT‑4o "coach" reply]
+ E --> F[ElevenLabs TTS]
+ F -->|audio stream| A
+ E --> G[LangGraph memory adaptor]
+ G -->|persist| H[Firestore: coaching_sessions]
+```
+
+* **STT** – Either send the recorded chunk to the backend for Whisper or use the `use‑whisper` React hook (streams to the same API) for near‑real‑time captions ([github.com][3]).
+* **TTS** – ElevenLabs low‑latency streaming; the React SDK exposes `useConversation()` and handles WebAudio playback ([elevenlabs.io][4]).
+* **Average round‑trip** (400–700 ms STT + 1.5 s GPT + 800 ms TTS) is well inside your 7 s SLA if you parallelise STT upload while GPT thinks.
+
+---
+
+## 3. Memory & data persistence
+
+| Scope                                                         | Storage mechanism                                                                                                                   | Rationale                                                                                                 |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Per‑session context (≤ 10 turns)**                          | `BufferMemory` (in‑RAM) inside each LangGraph run                                                                                   | Fast, cheap, auto‑clears; keeps prompt size small.                                                        |
+| **Long‑term coaching history**                                | **FirestoreChatMessageHistory** (official LangChain adaptor) ([js.langchain.com][5])                                                | Lets you query or embed past turns later (e.g., “remind the analyst what they improved since last week”). |
+| **Performance metadata** (scores, typical errors, skill tags) | Firestore collection `users/{uid}/metrics/{sessionId}`                                                                              | Structured objects are easier to query/aggregate than raw chat.                                           |
+| **Future coaching modules**                                   | Separate collection `coachingModules/{moduleId}` with a “prerequisite tag” array so you can recommend modules based on the metrics. |                                                                                                           |
+
+> **Why *not* rely on LangChain’s built‑in “memory” for everything?**
+> Built‑ins are optimised for *current* context, not analytics or cross‑session queries. Firestore gives ACID guarantees, security‑rules, and triggers for later automation. You can still *hydrate* part of that history back into LangGraph at run‑time (e.g., the five most recent “common errors”). ([pingcap.com][6])
+
+---
+
+## 4. Firestore data model outline
+
+```text
+users/
+  {uid}/profile            – name, role, hireDate
+  {uid}/metrics/
+        {sessionId}        – { correct: 7, incorrect: 2, flaggedTopics: ['KYC'], … }
+  {uid}/sessions/
+        {sessionId}/transcript (sub‑collection of message docs)
+sops/
+  {sopId}/content
+coachingModules/
+  {moduleId} { title, tags:[…], ttsVoice }
+```
+
+*Each transcript document can be a LangChain `ChatMessage` JSON so you can reload it directly into a `ChatMessageHistory` helper.*
+
+---
+
+## 5. Express + LangGraph glue code (TypeScript sketch)
+
+```ts
+import { Router } from 'express';
+import { FirestoreChatMessageHistory } from '@langchain/community/memory';
+import { buildCoachGraph } from './coachGraph'; // your LangGraph builder
+
+const router = Router();
+
+router.post('/coach', async (req, res) => {
+  const { audioBlob, sopId, userDecision, uid } = req.body;
+
+  // 1️⃣ transcribe
+  const transcript = await whisperTranscribe(audioBlob);
+
+  // 2️⃣ get long‑term memory
+  const history = new FirestoreChatMessageHistory({ uid, sessionId: req.sessionID });
+
+  // 3️⃣ run graph
+  const coachGraph = buildCoachGraph({ history, sopId, userDecision });
+  const { replyText, replyAudio } = await coachGraph.invoke({ userInput: transcript });
+
+  // 4️⃣ save metrics asynchronously
+  queueMetricUpdate({ uid, sessionId: req.sessionID, transcript, replyText });
+
+  res.json({ replyAudio }); // audio is a base64 chunk or presigned URL
+});
+
+export default router;
+```
+
+---
+
+## 6. Front‑end pointers
+
+1. **Mic capture** – Use MediaRecorder to collect \~2 s chunks, POST to `/api/coach`; show interim captions if `useWhisper` is enabled.
+2. **Audio playback** – The ElevenLabs SDK can play a binary stream; fall back to `Audio()` for browsers without SharedArrayBuffer.
+3. **UI state** – A React Context that stores `conversation`, `isThinking`, `error` will keep the component tree light.
+4. **Latency hints** – Grey‑out the form and display “Coach is listening…” during round‑trip to reinforce the voice modality.
+
+---
+
+## 7. Handling “there seems to be an error” locally
+
+* **Oversubscribed dev script** – Your root *dev* script spawns Vite **and** the Express dev process concurrently. Make sure the backend’s `PORT` (default = 3001?) does not clash with Vite’s 5173.
+* **ESM vs CJS** – Because `"type": "module"` is set , any `require()` calls in your server must be converted to `import`.
+* **Env variables** – Whisper, ElevenLabs, and Firebase creds must be loaded in *both* frontend (limited) and backend via `.env` or secrets manager; missing keys are a common 500 cause.
+
+---
+
+## 8. Next steps checklist
+
+| 💡 Task                                                                                              | Owner     | Notes                                                                   |
+| ---------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------------------- |
+| Add `langgraph`, `@langchain/openai`, `@langchain/memory-firestore` to **server/package.json**       | Back‑end  | `npm i langgraph @langchain/openai @langchain/community firebase-admin` |
+| Provision Firebase service account & set security rules for `users/*`                                | DevOps    | Lock down PII in transcripts.                                           |
+| Implement Whisper upload endpoint; start with non‑streaming → upgrade to chunked when MVP stabilises | Back‑end  | Keep audio ≤ 25 MB per request to avoid timeouts.                       |
+| Integrate ElevenLabs React SDK; test on Chrome + Edge                                                | Front‑end | Use *low‑latency* model (< 300 ms).                                     |
+| Define coaching prompt template (system + few‑shot) in LangGraph node                                | Product   | Include tone guidelines (“encouraging”, “clarifying”).                  |
+| Capture metrics and surface a simple “progress dashboard”                                            | Front‑end | Recharts is already a dependency .                                      |
+| Write an automated Jest test that feeds a sample audio blob and asserts a JSON reply structure       | QA        | Helps CI flag model or API regressions.                                 |
+
+---
+
+### Summary
+
+* **LangGraph** gives you deterministic, inspectable multi‑turn logic—the right abstraction for a voice‑first coach.
+* **Short‑term memory** lives in LangChain buffers; **long‑term skill tracking** belongs in Firestore where it can power dashboards and personalised coaching modules.
+* **Whisper + ElevenLabs** complete the voice loop and both have JS/TS SDKs that play nicely with React.
+* Converging on this stack keeps your prototype lean while leaving headroom for real‑time streaming and analytics layers later.
+
+Feel free to ask for deeper code examples, deployment advice, or help wiring up the Firebase rules once you start integrating.
+
+[1]: https://www.langchain.com/langgraph?utm_source=chatgpt.com "LangGraph - LangChain"
+[2]: https://langchain-ai.github.io/langgraph/?utm_source=chatgpt.com "LangGraph"
+[3]: https://github.com/chengsokdara/use-whisper?utm_source=chatgpt.com "chengsokdara/use-whisper: React hook for OpenAI ... - GitHub"
+[4]: https://elevenlabs.io/docs/conversational-ai/libraries/react?utm_source=chatgpt.com "React SDK | ElevenLabs Documentation"
+[5]: https://js.langchain.com/docs/integrations/memory/firestore/?utm_source=chatgpt.com "Firestore Chat Memory - LangChain.js"
+[6]: https://www.pingcap.com/article/langchain-memory-implementation-a-comprehensive-guide/?utm_source=chatgpt.com "LangChain Memory Implementation: A Comprehensive Guide - TiDB"
